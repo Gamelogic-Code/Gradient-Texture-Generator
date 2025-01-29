@@ -104,11 +104,164 @@ namespace Gamelogic.Experimental.Tools.Editor
 			return property;
 		}
 	}
+
+	/// <summary>
+	/// A window that can be use as a base class for texture generation windows. See the code of
+	/// <see cref="RampTextureGenerator"/> for an example of how to implement a texture generation window.
+	/// </summary>
+	public abstract class TextureGeneratorWindow : EditorWindow
+	{
+		private const int DefaultImageSize = 256;
+		private static readonly Vector2Int PreviewImageSizeMax = new(256, 256);
+		
+		private Vector2Int imageDimensions = new(DefaultImageSize, DefaultImageSize);
+		private Texture2D previewTexture;
+		
+		Vector2Int PreviewDimensions => Vector2Int.Min(PreviewImageSizeMax, imageDimensions);
+		
+		public void OnGUI()
+		{
+			EditorGUI.BeginChangeCheck();
+			DrawPropertiesGui();
+			DrawImageSizeControls(ref imageDimensions);
+
+			if (EditorGUI.EndChangeCheck())
+			{
+				GeneratePreviewTexture();
+			}
+
+			DrawPreviewTexture();
+
+			if (GUILayout.Button("Save Texture"))
+			{
+				GenerateAndSaveTexture();
+			}
+		}
+		
+		public void OnEnable()
+		{
+			InitSerializedObjects(); // Can this be done elsewhere?
+
+			GeneratePreviewTexture();
+		}
+		
+		public void OnDestroy()
+		{
+			if (previewTexture != null)
+			{
+				DestroyImmediate(previewTexture);
+			}
+		}
+		
+		/// <summary>
+		/// Draws a header label.
+		/// </summary>
+		/// <param name="text">The header text.</param>
+		// Reuse candidate
+		protected static void Header(string text) => EditorGUILayout.LabelField(text, EditorStyles.boldLabel);
+
+		/// <summary>
+		/// Draw controls for the specific texture window. 
+		/// </summary>
+		/// <remarks>
+		/// You do not need to draw the image dimensions controls, the preview texture or the save button. 
+		/// </remarks>
+		protected abstract void DrawPropertiesGui();
+
+		/// <summary>
+		/// Use this for initialing serialized objects used to render better UI controls. This is called in
+		/// <see cref="OnEnable"/>.
+		/// </summary>
+		protected abstract void InitSerializedObjects();
+
+		/// <summary>
+		/// This function generates the texture based on the current settings.
+		/// </summary>
+		/// <param name="dimensions"></param>
+		protected abstract Texture2D GenerateTexture(Vector2Int dimensions);
+
+		private static void DrawImageSizeControls(ref Vector2Int imageDimensions)
+		{
+			EditorGUILayout.BeginHorizontal();
+			if(GUILayout.Button("512x512"))
+			{
+				imageDimensions = new Vector2Int(512, 512);
+			}
+			if(GUILayout.Button("256x256"))
+			{
+				imageDimensions = new Vector2Int(256, 256);
+			}
+			if(GUILayout.Button("256x8"))
+			{
+				imageDimensions = new Vector2Int(256, 8);
+			}
+				
+			EditorGUILayout.EndHorizontal();
+			imageDimensions = EditorGUILayout.Vector2IntField("Image Dimensions", imageDimensions);
+		}
+
+		private void DrawPreviewTexture()
+		{
+			if (previewTexture == null)
+			{
+				return;
+			}
+
+			EditorGUILayout.Space();
+			Header("Preview");
+			var previewRect = GUILayoutUtility.GetRect(256, 256, GUILayout.ExpandWidth(true));
+			EditorGUI.DrawPreviewTexture(previewRect, previewTexture, null, ScaleMode.ScaleToFit);
+		}
+			
+		private void GenerateAndSaveTexture()
+		{
+			string path = EditorUtility.SaveFilePanel("Save Texture", string.Empty, "GradientTexture.png", "png");
+
+			if (string.IsNullOrEmpty(path))
+			{
+				return;
+			}
+
+			var texture = GenerateTexture(imageDimensions);
+			SaveTexture(texture, path);
+			DestroyImmediate(texture);
+
+			EditorUtility.DisplayDialog("Success", "Texture saved to:\n" + path, "OK");
+		}
+		
+		private static void SaveTexture(Texture2D texture, string path)
+		{
+			texture.wrapMode = TextureWrapMode.Clamp;
+			byte[] bytes = texture.EncodeToPNG();
+			File.WriteAllBytes(path, bytes);
+			AssetDatabase.Refresh();
+			
+			string assetPath = "Assets" + path.Substring(Application.dataPath.Length);
+			var importer = (TextureImporter)AssetImporter.GetAtPath(assetPath);
+			
+			if (importer != null)
+			{
+				importer.wrapMode = TextureWrapMode.Clamp;
+				importer.SaveAndReimport();
+			}
+		}
+
+		private void GeneratePreviewTexture()
+		{
+			if (previewTexture != null)
+			{
+				DestroyImmediate(previewTexture);
+			}
+
+			previewTexture = GenerateTexture(PreviewDimensions);
+			Repaint();
+		}
+	}
 	
 	/// <summary>
 	/// Editor window for generating gradient textures.
 	/// </summary>
-	public class RampTextureGenerator : EditorWindow
+	public class RampTextureGenerator : TextureGeneratorWindow
 	{
 		private enum Direction
 		{
@@ -127,8 +280,6 @@ namespace Gamelogic.Experimental.Tools.Editor
 		
 		private const string ToolName = "Gradient Texture Generator";
 		private const string ToolMenuPath = "Gamelogic/Tools/" + ToolName;
-		private const int DefaultImageSize = 256;
-		private static readonly Vector2Int PreviewImageSizeMax = new(256, 256);
 		
 		private Gradient gradient = new()
 		{
@@ -175,11 +326,11 @@ namespace Gamelogic.Experimental.Tools.Editor
 		};
 		
 		private Color singleColor = Color.white;
+		
 		private ColorList colorList;
 		private SerializedObject serializedObject;
 		private SerializedProperty colorsProperty;
-		private Vector2Int imageDimensions = new(DefaultImageSize, DefaultImageSize);
-
+		
 		private GradientType gradientType = GradientType.Curve;
 		private Direction direction = Direction.X;
 
@@ -188,13 +339,14 @@ namespace Gamelogic.Experimental.Tools.Editor
 		private bool flipT = false;
 		private float offsetAngle = 0;
 		private bool circularGradient;
-
-		private Texture2D previewTexture;
 		
+		/// <summary>
+		/// Shows an instance of the <see cref="RampTextureGenerator"/> window.
+		/// </summary>
 		[MenuItem(ToolMenuPath)]
 		public static void ShowWindow() => GetWindow<RampTextureGenerator>(ToolName);
 
-		private void OnEnable()
+		protected override void InitSerializedObjects()
 		{
 			if (colorList == null)
 			{
@@ -203,65 +355,44 @@ namespace Gamelogic.Experimental.Tools.Editor
 
 			serializedObject = new SerializedObject(colorList);
 			colorsProperty = serializedObject.FindRequiredProperty(colorList.ColorsFieldName);
-			var previewDimensions = Vector2Int.Min(PreviewImageSizeMax, imageDimensions);
-			GeneratePreviewTexture(previewDimensions);
 		}
 
-		private void OnGUI()
+		protected override void DrawPropertiesGui()
 		{
 			serializedObject.Update();
-			EditorGUI.BeginChangeCheck();
-
 			gradientType = (GradientType)EditorGUILayout.EnumPopup("Gradient Type", gradientType);
 			EditorGUILayout.Space();
-			
+
 			Header("Sample Settings");
 			DrawSingleColorControls();
 			DrawGradientControls();
 			DrawCurveControls();
 			DrawDiscreteStepControls();
 			EditorGUILayout.Space();
-			
+
 			Header("Generation Settings");
 			DrawDirectionControls();
 			DrawAngularControls();
-			DrawImageSizeControls();
-
-			var previewDimensions = Vector2Int.Min(PreviewImageSizeMax, imageDimensions);
-
-			if (EditorGUI.EndChangeCheck())
-			{
-				serializedObject.ApplyModifiedProperties();
-				GeneratePreviewTexture(previewDimensions);
-			}
-
-			DrawPreviewTexture();
-			EditorGUILayout.Space();
-			
-			if (GUILayout.Button("Save Texture"))
-			{
-				GenerateAndSaveTexture();
-			}
 
 			return;
-			
+
 			void DrawSingleColorControls()
 			{
 				if (gradientType != GradientType.SingleColor)
 				{
 					return;
 				}
-				
+
 				singleColor = EditorGUILayout.ColorField(singleColor);
 			}
-			
+
 			void DrawGradientControls()
 			{
 				if (gradientType != GradientType.Gradient)
 				{
 					return;
 				}
-				
+
 				gradient = EditorGUILayout.GradientField("Gradient", gradient);
 			}
 
@@ -271,7 +402,7 @@ namespace Gamelogic.Experimental.Tools.Editor
 				{
 					return;
 				}
-				
+
 				colorCurve = EditorGUILayout.CurveField("Curve", colorCurve);
 				alphaCurve = EditorGUILayout.CurveField("Alpha Curve", alphaCurve);
 				EditorGUILayout.PropertyField(colorsProperty, new GUIContent("Colors"), true);
@@ -284,31 +415,11 @@ namespace Gamelogic.Experimental.Tools.Editor
 				EditorGUI.BeginDisabledGroup(!discreteSteps);
 				steps = EditorGUILayout.IntField("Steps", steps);
 				steps = Mathf.Max(1, steps); // Ensure steps is at least 1
-				
-				circularGradient = EditorGUILayout.Toggle("Circular gradient", circularGradient);
-				
-				EditorGUI.EndDisabledGroup();
-				EditorGUI.EndDisabledGroup();
-			}
 
-			void DrawImageSizeControls()
-			{
-				EditorGUILayout.BeginHorizontal();
-				if(GUILayout.Button("512x512"))
-				{
-					imageDimensions = new Vector2Int(512, 512);
-				}
-				if(GUILayout.Button("256x256"))
-				{
-					imageDimensions = new Vector2Int(256, 256);
-				}
-				if(GUILayout.Button("256x8"))
-				{
-					imageDimensions = new Vector2Int(256, 8);
-				}
-				
-				EditorGUILayout.EndHorizontal();
-				imageDimensions = EditorGUILayout.Vector2IntField("Image Dimensions", imageDimensions);
+				circularGradient = EditorGUILayout.Toggle("Circular gradient", circularGradient);
+
+				EditorGUI.EndDisabledGroup();
+				EditorGUI.EndDisabledGroup();
 			}
 
 			void DrawDirectionControls()
@@ -318,84 +429,21 @@ namespace Gamelogic.Experimental.Tools.Editor
 				flipT = EditorGUILayout.Toggle("Flip T", flipT);
 				EditorGUI.EndDisabledGroup();
 			}
-			
+
 			void DrawAngularControls()
 			{
 				if (direction != Direction.Angular)
 				{
 					return;
 				}
+
 				EditorGUI.BeginDisabledGroup(gradientType == GradientType.SingleColor);
 				offsetAngle = EditorGUILayout.FloatField("Offset Angle (Degrees)", offsetAngle);
 				EditorGUI.EndDisabledGroup();
 			}
-
-			void DrawPreviewTexture()
-			{
-				if (previewTexture == null)
-				{
-					return;
-				}
-				
-				EditorGUILayout.Space();
-				Header("Preview");
-				var previewRect = GUILayoutUtility.GetRect(previewDimensions.x, previewDimensions.y, GUILayout.ExpandWidth(true));
-				EditorGUI.DrawPreviewTexture(previewRect, previewTexture, null, ScaleMode.ScaleToFit);
-			}
-
-			
 		}
 
-		/// <summary>
-		/// Draws a header label.
-		/// </summary>
-		/// <param name="text">The header text.</param>
-		// Reuse candidate
-		private void Header(string text) => EditorGUILayout.LabelField(text, EditorStyles.boldLabel);
-
-		private void GeneratePreviewTexture(Vector2Int previewDimensions)
-		{
-			if (previewTexture != null)
-			{
-				DestroyImmediate(previewTexture);
-			}
-
-			previewTexture = GenerateTexture(previewDimensions);
-			Repaint();
-		}
-
-		private void GenerateAndSaveTexture()
-		{
-			string path = EditorUtility.SaveFilePanel("Save Texture", string.Empty, "GradientTexture.png", "png");
-
-			if (string.IsNullOrEmpty(path))
-			{
-				return;
-			}
-
-			var texture = GenerateTexture(imageDimensions);
-			texture.wrapMode = TextureWrapMode.Clamp;
-
-			byte[] bytes = texture.EncodeToPNG();
-			File.WriteAllBytes(path, bytes);
-			AssetDatabase.Refresh();
-			
-			string assetPath = "Assets" + path.Substring(Application.dataPath.Length);
-			var importer = (TextureImporter)AssetImporter.GetAtPath(assetPath);
-			
-			if (importer != null)
-			{
-				importer.wrapMode = TextureWrapMode.Clamp;
-				importer.SaveAndReimport();
-			}
-
-			
-			DestroyImmediate(texture);
-
-			EditorUtility.DisplayDialog("Success", "Texture saved to:\n" + path, "OK");
-		}
-
-		private Texture2D GenerateTexture(Vector2Int dimensions)
+		protected override Texture2D GenerateTexture(Vector2Int dimensions)
 		{
 			var texture = new Texture2D(dimensions.x, dimensions.y, TextureFormat.RGBA32, false);
 
@@ -453,7 +501,7 @@ namespace Gamelogic.Experimental.Tools.Editor
 			float scaled = t * steps;
 			float xn = Mathf.FloorToInt(scaled);
 			float stepIndex = Mathf.Clamp(xn, 0, steps - 1);
-			float stepT = stepIndex / (circularGradient ? steps : (steps - 1));
+			float stepT = stepIndex / (circularGradient ? steps : steps - 1);
 			return stepT;
 		}
 
@@ -466,13 +514,7 @@ namespace Gamelogic.Experimental.Tools.Editor
 				_ => throw new ArgumentOutOfRangeException($"No implementation for {gradientType} of type {gradientType.GetType()}")
 			};
 
-		private void OnDestroy()
-		{
-			if (previewTexture != null)
-			{
-				DestroyImmediate(previewTexture);
-			}
-		}
+		
 	}
 	
 	public enum PatternType
@@ -485,31 +527,26 @@ namespace Gamelogic.Experimental.Tools.Editor
 	/// <summary>
 	/// Editor window for generating checkerboard textures.
 	/// </summary>
-	public class CheckerboardTextureGenerator : EditorWindow
+	public class PatternTextureGenerator : TextureGeneratorWindow
 	{
 		private const string ToolName = "Pattern Texture Generator";
 		private const string ToolMenuPath = "Gamelogic/Tools/" + ToolName;
-		private const int DefaultImageSize = 256;
-		
 		private PatternType patternType = PatternType.CheckerBoard;
-		private Vector2Int imageDimensions = new(DefaultImageSize, DefaultImageSize);
 		private Vector2Int cellDimensions = new(32, 32);
 		private Color color1 = Color.black;
 		private Color color2 = Color.white;
 		private Texture2D previewTexture;
 
 		[MenuItem(ToolMenuPath)]
-		public static void ShowWindow() => GetWindow<CheckerboardTextureGenerator>(ToolName);
+		public static void ShowWindow() => GetWindow<PatternTextureGenerator>(ToolName);
 
-		private void OnEnable()
+		protected override void InitSerializedObjects()
 		{
-			GeneratePreviewTexture();
+			// Nothing to do. 
 		}
 
-		private void OnGUI()
+		protected override void DrawPropertiesGui()
 		{
-			EditorGUI.BeginChangeCheck();
-			
 			Header("Colors");
 			color1 = EditorGUILayout.ColorField("Color 1", color1);
 			color2 = EditorGUILayout.ColorField("Color 2", color2);
@@ -517,45 +554,17 @@ namespace Gamelogic.Experimental.Tools.Editor
 			patternType = (PatternType)EditorGUILayout.EnumPopup("Pattern Type", patternType);
 			
 			Header("Pattern Settings");
-			switch (patternType)
+
+			cellDimensions = patternType switch
 			{
-				case PatternType.CheckerBoard:
-					cellDimensions = EditorGUILayout.Vector2IntField("Cell Dimensions", cellDimensions);
-					break;
-				
-			}
-			
+				PatternType.CheckerBoard => EditorGUILayout.Vector2IntField("Cell Dimensions", cellDimensions),
+				_ => cellDimensions
+			};
+
 			Header("Output Settings");
-			
-			imageDimensions = EditorGUILayout.Vector2IntField("Image Dimensions", imageDimensions);
-
-			if (EditorGUI.EndChangeCheck())
-			{
-				GeneratePreviewTexture();
-			}
-
-			DrawPreviewTexture();
-
-			if (GUILayout.Button("Save Texture"))
-			{
-				GenerateAndSaveTexture();
-			}
 		}
 
-		private void Header(string text) => EditorGUILayout.LabelField(text, EditorStyles.boldLabel);
-
-		private void GeneratePreviewTexture()
-		{
-			if (previewTexture != null)
-			{
-				DestroyImmediate(previewTexture);
-			}
-
-			previewTexture = GenerateTexture(imageDimensions);
-			Repaint();
-		}
-
-		private Texture2D GenerateTexture(Vector2Int dimensions)
+		protected override Texture2D GenerateTexture(Vector2Int dimensions)
 		{
 			switch (patternType)
 			{
@@ -568,41 +577,6 @@ namespace Gamelogic.Experimental.Tools.Editor
 				default:
 					throw new ArgumentOutOfRangeException();
 			}
-			
-		}
-
-		private void DrawPreviewTexture()
-		{
-			if (previewTexture == null)
-			{
-				return;
-			}
-
-			EditorGUILayout.Space();
-			Header("Preview");
-			var previewRect = GUILayoutUtility.GetRect(256, 256, GUILayout.ExpandWidth(true));
-			EditorGUI.DrawPreviewTexture(previewRect, previewTexture, null, ScaleMode.ScaleToFit);
-		}
-
-		private void GenerateAndSaveTexture()
-		{
-			string path = EditorUtility.SaveFilePanel("Save Texture", string.Empty, "CheckerboardTexture.png", "png");
-
-			if (string.IsNullOrEmpty(path))
-			{
-				return;
-			}
-
-			var texture = GenerateTexture(imageDimensions);
-			texture.wrapMode = TextureWrapMode.Clamp;
-
-			byte[] bytes = texture.EncodeToPNG();
-			File.WriteAllBytes(path, bytes);
-			AssetDatabase.Refresh();
-
-			DestroyImmediate(texture);
-
-			EditorUtility.DisplayDialog("Success", "Texture saved to:\n" + path, "OK");
 		}
 
 		private Texture2D GenerateTexture_CheckerBoard(Vector2Int dimensions)
@@ -652,16 +626,11 @@ namespace Gamelogic.Experimental.Tools.Editor
 				{
 					float u = x / (dimensions.x - 1f);
 					float v = y / (dimensions.y - 1f);
-					Color color;
-					Color hsl = Color.HSVToRGB(u, 1f, 1f);
-					if (v < 0.5)
-					{
-						color = Color.Lerp(Color.black, hsl, v * 2f);
-					}
-					else
-					{
-						color = Color.Lerp(hsl, Color.white, (v - 0.5f) * 2f);
-					}
+					var hsl = Color.HSVToRGB(u, 1f, 1f);
+					
+					var color = v < 0.5 
+						? Color.Lerp(Color.black, hsl, v * 2f) 
+						: Color.Lerp(hsl, Color.white, (v - 0.5f) * 2f);
 						
 					texture.SetPixel(x, y, color);
 				}
@@ -670,14 +639,6 @@ namespace Gamelogic.Experimental.Tools.Editor
 			texture.wrapMode = TextureWrapMode.Clamp;
 			texture.Apply();
 			return texture;
-		}
-
-		private void OnDestroy()
-		{
-			if (previewTexture != null)
-			{
-				DestroyImmediate(previewTexture);
-			}
 		}
 	}
 }
