@@ -1,15 +1,29 @@
 // Author: Herman Tulleken
 // www.gamelogic.co.za
 
-using System;
-using System.Collections.Generic;
-using UnityEngine;
-using UnityEditor;
-using System.IO;
-using Random = UnityEngine.Random;
+/*	This file implements two texture generation tools for Unity. These textures are useful for use in shaders or shader
+	development. 
+	
+	To use it, copy in into an Editor folder, and find the tools on the menu under Gamelogic/Tools/
+		Gradient Texture Generator (Linear, circular and angular gradients, or colors interpolated with a curve. Discrete 
+		and continuous.) 
+		Pattern Texture Generator (Checkerboard, white noise, and HSL color patterns.)
+	
+	You can easily add your own texture generation tool by extending from TextureGeneratorWindow and implementing the
+	abstract methods.
+	
+	Send questions to support@gamelogic.co.za.
+*/
 
 namespace Gamelogic.Experimental.Tools.Editor
 {
+	using System;
+	using System.Collections.Generic;
+	using UnityEngine;
+	using UnityEditor;
+	using System.IO;
+	using Random = UnityEngine.Random;
+	
 	/// <summary>
 	/// Wraps a list of colors in a <see cref="ScriptableObject"/>.
 	/// </summary>
@@ -106,7 +120,7 @@ namespace Gamelogic.Experimental.Tools.Editor
 	}
 
 	/// <summary>
-	/// A window that can be use as a base class for texture generation windows. See the code of
+	/// A window that can be used as a base class for texture generation windows. See the code of
 	/// <see cref="RampTextureGenerator"/> for an example of how to implement a texture generation window.
 	/// </summary>
 	public abstract class TextureGeneratorWindow : EditorWindow
@@ -517,18 +531,18 @@ namespace Gamelogic.Experimental.Tools.Editor
 		
 	}
 	
-	public enum PatternType
-	{
-		WhiteNoise,
-		CheckerBoard,
-		HslColor
-	}
-	
 	/// <summary>
 	/// Editor window for generating checkerboard textures.
 	/// </summary>
 	public class PatternTextureGenerator : TextureGeneratorWindow
 	{
+		private enum PatternType
+		{
+			WhiteNoise,
+			CheckerBoard,
+			HslColor
+		}
+		
 		private const string ToolName = "Pattern Texture Generator";
 		private const string ToolMenuPath = "Gamelogic/Tools/" + ToolName;
 		private PatternType patternType = PatternType.CheckerBoard;
