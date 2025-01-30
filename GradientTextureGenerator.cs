@@ -126,7 +126,11 @@ namespace Gamelogic.Experimental.Tools.Editor
 	public abstract class TextureGeneratorWindow : EditorWindow
 	{
 		private const int DefaultImageSize = 256;
+		private const string NoTexture = "No texture was created.";
+		private const string TextureDimensionsDontMatch = "Created texture dimensions do not match those requested.";
+		
 		private static readonly Vector2Int PreviewImageSizeMax = new(256, 256);
+		
 		
 		private Vector2Int imageDimensions = new(DefaultImageSize, DefaultImageSize);
 		private Texture2D previewTexture;
@@ -135,11 +139,12 @@ namespace Gamelogic.Experimental.Tools.Editor
 		
 		public void OnGUI()
 		{
+			//UpdateSerializedObjects();
 			EditorGUI.BeginChangeCheck();
 			DrawPropertiesGui();
 			DrawImageSizeControls(ref imageDimensions);
 
-			if (EditorGUI.EndChangeCheck())
+			if (EditorGUI.EndChangeCheck() || previewTexture == null)
 			{
 				GeneratePreviewTexture();
 			}
@@ -150,13 +155,6 @@ namespace Gamelogic.Experimental.Tools.Editor
 			{
 				GenerateAndSaveTexture();
 			}
-		}
-		
-		public void OnEnable()
-		{
-			InitSerializedObjects(); // Can this be done elsewhere?
-
-			GeneratePreviewTexture();
 		}
 		
 		public void OnDestroy()
@@ -181,12 +179,6 @@ namespace Gamelogic.Experimental.Tools.Editor
 		/// You do not need to draw the image dimensions controls, the preview texture or the save button. 
 		/// </remarks>
 		protected abstract void DrawPropertiesGui();
-
-		/// <summary>
-		/// Use this for initialing serialized objects used to render better UI controls. This is called in
-		/// <see cref="OnEnable"/>.
-		/// </summary>
-		protected abstract void InitSerializedObjects();
 
 		/// <summary>
 		/// This function generates the texture based on the current settings.
@@ -226,7 +218,7 @@ namespace Gamelogic.Experimental.Tools.Editor
 			var previewRect = GUILayoutUtility.GetRect(256, 256, GUILayout.ExpandWidth(true));
 			EditorGUI.DrawPreviewTexture(previewRect, previewTexture, null, ScaleMode.ScaleToFit);
 		}
-			
+
 		private void GenerateAndSaveTexture()
 		{
 			string path = EditorUtility.SaveFilePanel("Save Texture", string.Empty, "GradientTexture.png", "png");
@@ -237,10 +229,21 @@ namespace Gamelogic.Experimental.Tools.Editor
 			}
 
 			var texture = GenerateTexture(imageDimensions);
-			SaveTexture(texture, path);
-			DestroyImmediate(texture);
 
-			EditorUtility.DisplayDialog("Success", "Texture saved to:\n" + path, "OK");
+			if (texture != null)
+			{
+				SaveTexture(texture, path);
+				DestroyImmediate(texture);
+
+				if (texture.width != imageDimensions.x || texture.height != imageDimensions.y)
+				{
+					Debug.LogWarning(TextureDimensionsDontMatch);
+				}
+			}
+			else
+			{
+				Debug.LogWarning(NoTexture);
+			}
 		}
 		
 		private static void SaveTexture(Texture2D texture, string path)
@@ -268,6 +271,19 @@ namespace Gamelogic.Experimental.Tools.Editor
 			}
 
 			previewTexture = GenerateTexture(PreviewDimensions);
+
+			if (previewTexture != null)
+			{
+				if (previewTexture.width != PreviewDimensions.x || previewTexture.height != PreviewDimensions.y)
+				{
+					Debug.LogWarning(TextureDimensionsDontMatch);
+				}
+			}
+			else
+			{
+				Debug.LogWarning(NoTexture);
+			}
+			
 			Repaint();
 		}
 	}
@@ -360,20 +376,24 @@ namespace Gamelogic.Experimental.Tools.Editor
 		[MenuItem(ToolMenuPath)]
 		public static void ShowWindow() => GetWindow<RampTextureGenerator>(ToolName);
 
-		protected override void InitSerializedObjects()
+		private void InitSerializedObjects()
 		{
-			if (colorList == null)
+			if (colorList != null)
 			{
-				colorList = CreateInstance<ColorList>();
+				return;
 			}
-
+			
+			colorList = CreateInstance<ColorList>();
 			serializedObject = new SerializedObject(colorList);
 			colorsProperty = serializedObject.FindRequiredProperty(colorList.ColorsFieldName);
 		}
 
+		private void UpdateSerializedObjects() => serializedObject.Update();
+
 		protected override void DrawPropertiesGui()
 		{
-			serializedObject.Update();
+			InitSerializedObjects();
+			UpdateSerializedObjects();
 			gradientType = (GradientType)EditorGUILayout.EnumPopup("Gradient Type", gradientType);
 			EditorGUILayout.Space();
 
@@ -388,6 +408,7 @@ namespace Gamelogic.Experimental.Tools.Editor
 			DrawDirectionControls();
 			DrawAngularControls();
 
+			serializedObject.ApplyModifiedProperties();
 			return;
 
 			void DrawSingleColorControls()
@@ -553,12 +574,7 @@ namespace Gamelogic.Experimental.Tools.Editor
 
 		[MenuItem(ToolMenuPath)]
 		public static void ShowWindow() => GetWindow<PatternTextureGenerator>(ToolName);
-
-		protected override void InitSerializedObjects()
-		{
-			// Nothing to do. 
-		}
-
+		
 		protected override void DrawPropertiesGui()
 		{
 			Header("Colors");
@@ -580,17 +596,13 @@ namespace Gamelogic.Experimental.Tools.Editor
 
 		protected override Texture2D GenerateTexture(Vector2Int dimensions)
 		{
-			switch (patternType)
+			return patternType switch
 			{
-				case PatternType.CheckerBoard:
-					return GenerateTexture_CheckerBoard(dimensions);
-				case PatternType.WhiteNoise:
-					return GenerateTexture_WhiteNoise(dimensions);
-				case PatternType.HslColor:
-					return GenerateTexture_HslColor(dimensions);
-				default:
-					throw new ArgumentOutOfRangeException();
-			}
+				PatternType.CheckerBoard => GenerateTexture_CheckerBoard(dimensions),
+				PatternType.WhiteNoise => GenerateTexture_WhiteNoise(dimensions),
+				PatternType.HslColor => GenerateTexture_HslColor(dimensions),
+				_ => throw new ArgumentOutOfRangeException()
+			};
 		}
 
 		private Texture2D GenerateTexture_CheckerBoard(Vector2Int dimensions)
