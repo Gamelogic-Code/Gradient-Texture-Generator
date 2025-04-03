@@ -5,9 +5,9 @@
 	development. 
 	
 	To use it, copy in into an Editor folder, and find the tools on the menu under Gamelogic/Tools/
-		Gradient Texture Generator (Linear, circular and angular gradients, or colors interpolated with a curve. Discrete 
-		and continuous.) 
-		Pattern Texture Generator (Checkerboard, white noise, and HSL color patterns.)
+	-	Gradient Texture Generator (Linear, circular and angular gradients, or colors interpolated with a custom curve or 
+		sine wave. Discrete and continuous.) 
+	-	Pattern Texture Generator (Checkerboard, white noise, and HSL color patterns.)
 	
 	You can easily add your own texture generation tool by extending from TextureGeneratorWindow and implementing the
 	abstract methods.
@@ -232,13 +232,13 @@ namespace Gamelogic.Experimental.Tools.Editor
 
 			if (texture != null)
 			{
-				SaveTexture(texture, path);
-				DestroyImmediate(texture);
-
 				if (texture.width != imageDimensions.x || texture.height != imageDimensions.y)
 				{
 					Debug.LogWarning(TextureDimensionsDontMatch);
 				}
+				
+				SaveTexture(texture, path);
+				DestroyImmediate(texture);
 			}
 			else
 			{
@@ -305,7 +305,8 @@ namespace Gamelogic.Experimental.Tools.Editor
 		{
 			SingleColor,
 			Gradient,
-			Curve
+			Curve,
+			Sine
 		}
 		
 		private const string ToolName = "Gradient Texture Generator";
@@ -370,6 +371,13 @@ namespace Gamelogic.Experimental.Tools.Editor
 		private float offsetAngle = 0;
 		private bool circularGradient;
 		
+		private float sineFrequency = 1f;
+		private float phaseFraction = 0;
+		
+		private float sineAmplitude = 0.5f;
+		private float sineAmplitudeOffset = 0.5f;
+		
+		
 		/// <summary>
 		/// Shows an instance of the <see cref="RampTextureGenerator"/> window.
 		/// </summary>
@@ -400,7 +408,9 @@ namespace Gamelogic.Experimental.Tools.Editor
 			Header("Sample Settings");
 			DrawSingleColorControls();
 			DrawGradientControls();
+			
 			DrawCurveControls();
+			DrawSineControls();
 			DrawDiscreteStepControls();
 			EditorGUILayout.Space();
 
@@ -440,6 +450,21 @@ namespace Gamelogic.Experimental.Tools.Editor
 
 				colorCurve = EditorGUILayout.CurveField("Curve", colorCurve);
 				alphaCurve = EditorGUILayout.CurveField("Alpha Curve", alphaCurve);
+				EditorGUILayout.PropertyField(colorsProperty, new GUIContent("Colors"), true);
+			}
+			
+			void DrawSineControls()
+			{
+				if (gradientType != GradientType.Sine)
+				{
+					return;
+				}
+
+				sineFrequency = EditorGUILayout.FloatField("Frequency", sineFrequency);
+				phaseFraction = EditorGUILayout.Slider("Phase Fraction", phaseFraction, 0, 1);
+				
+				sineAmplitude = EditorGUILayout.FloatField("Amplitude", sineAmplitude);
+				sineAmplitudeOffset = EditorGUILayout.FloatField("Amplitude Offset", sineAmplitudeOffset);
 				EditorGUILayout.PropertyField(colorsProperty, new GUIContent("Colors"), true);
 			}
 
@@ -546,10 +571,12 @@ namespace Gamelogic.Experimental.Tools.Editor
 				GradientType.SingleColor => singleColor,
 				GradientType.Gradient => gradient.Evaluate(t),
 				GradientType.Curve => colorList.Evaluate(colorCurve.Evaluate(t)),
+				GradientType.Sine => colorList.Evaluate(EvaluateSine(t)),
 				_ => throw new ArgumentOutOfRangeException($"No implementation for {gradientType} of type {gradientType.GetType()}")
 			};
 
-		
+		private float EvaluateSine(float t) 
+			=> Mathf.Clamp01(Mathf.Sin(2 * Mathf.PI * (phaseFraction + sineFrequency * t)) * sineAmplitude + sineAmplitudeOffset);
 	}
 	
 	/// <summary>
